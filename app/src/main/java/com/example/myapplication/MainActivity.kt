@@ -3,12 +3,18 @@
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.util.Base64
+import android.util.Log
+import android.util.Log.DEBUG
+import android.util.Log.ERROR
+import android.util.Log.INFO
+import android.util.Log.VERBOSE
+import android.util.Log.WARN
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -82,6 +88,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.myapplication.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -93,9 +101,18 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import java.security.KeyFactory
+import java.security.PublicKey
+import java.security.SecureRandom
+import java.security.spec.X509EncodedKeySpec
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -198,6 +215,8 @@ private object CredentialsStorage {
     }
 }
 
+
+val cryptoManagerPC: CryptManager = CryptManager()
 @Composable
 fun MyApplicationApp() {
     val context = LocalContext.current
@@ -271,14 +290,19 @@ fun MyApplicationApp() {
                             errorMessage = "Заполните все поля"
                             return@Button
                         }
-
+                        cryptoManagerPC.generateAesKey()
+                        val k = cryptoManagerPC.getAesKeyBase64()
+                        val pwEncrypt = cryptoManagerPC.encryptWithAES(password)
+                        val lgEncrypt = cryptoManagerPC.encryptWithAES(login)
+                        Log.d("KEY","{$k}")
                         scope.launch {
                             isLoading = true
                             errorMessage = null
                             authToken = AuthRepository.login(
                                 serverIp = serverIp,
                                 login = login,
-                                password = password
+                                password = password,
+                                key = k
                             ).onFailure {
                                 errorMessage = it.message ?: "Ошибка авторизации"
                             }.getOrNull()
@@ -318,6 +342,12 @@ fun MyApplicationApp() {
     )
 }
 
+
+@Serializable
+data class DataWrapper(
+    val data_points:List<TimeseriesDataPointRequest>
+
+)
 @Composable
 private fun AuthenticatedRoot(
     serverIp: String,
@@ -337,7 +367,12 @@ private fun AuthenticatedRoot(
     var sendError by remember { mutableStateOf<String?>(null) }
     var sendSuccess by remember { mutableStateOf<String?>(null) }
     var isSending by remember { mutableStateOf(false) }
+    Log.d("aa","${pendingPoints.toList()}")
+    var aboba = Json.encodeToString(pendingPoints.toList())
+    Log.d("aa",aboba)
 
+
+    var pendingPointsEncrypted = cryptoManagerPC.encryptWithAES(aboba)
     val sendAllPending: () -> Unit = {
         if (pendingPoints.isEmpty()) {
             sendError = "Сначала добавьте хотя бы одну запись"
@@ -350,7 +385,7 @@ private fun AuthenticatedRoot(
                 AuthRepository.sendMyTimeseriesData(
                     serverIp = serverIp,
                     token = token,
-                    points = pendingPoints.toList()
+                    points = aboba
                 ).onSuccess {
                     sendSuccess = "Данные успешно отправлены"
                     pendingPoints.clear()
@@ -1187,10 +1222,10 @@ object AuthRepository {
         return retrofit.create(AuthApi::class.java)
     }
 
-    suspend fun login(serverIp: String, login: String, password: String): Result<String> {
+    suspend fun login(serverIp: String, login: String, password: String, key: String): Result<String> {
         return runCatching {
             val api = createApi(serverIp)
-            val response = api.login(AuthRequest(username = login, password = password))
+            val response = api.login(AuthRequest(username = login, password = password, key = key))
             if (!response.isSuccessful) {
                 error("Ошибка сервера: HTTP ${response.code()}")
             }
@@ -1201,6 +1236,8 @@ object AuthRepository {
     suspend fun getMyGlucoseData(serverIp: String, token: String): Result<GlucoseDataResponse> {
         return runCatching {
             val api = createApi(serverIp)
+
+            // Обернуть тут
             val response = api.getMyGlucoseData("Bearer ${token.trim()}")
             if (!response.isSuccessful) {
                 error("Ошибка сервера: HTTP ${response.code()}")
@@ -1212,10 +1249,12 @@ object AuthRepository {
     suspend fun sendMyTimeseriesData(
         serverIp: String,
         token: String,
-        points: List<TimeseriesDataPointRequest>
+        points: String
     ): Result<Unit> {
         return runCatching {
             val api = createApi(serverIp)
+
+            // Обернуть тут
             val response = api.sendMyTimeseriesData(
                 authorization = "Bearer ${token.trim()}",
                 request = TimeseriesDataRequest(dataPoints = points)
@@ -1225,4 +1264,106 @@ object AuthRepository {
             }
         }
     }
+}
+
+
+
+
+
+class CryptManager {
+    fun logCreator(
+        message: String,
+        tag: String = "CryptManager",
+        level: Int = DEBUG,
+    ) {
+        when (level) {
+            VERBOSE -> Log.v(tag, message)
+            DEBUG -> Log.d(tag, message)
+            INFO -> Log.i(tag, message)
+            WARN -> Log.w(tag, message)
+            ERROR -> Log.e(tag, message)
+        }
+    }
+
+    private val rsaTransformation = "RSA/ECB/PKCS1Padding"
+    private val aesTransformation = "AES/CBC/PKCS5Padding"
+    private var sessionAesKey: SecretKey? = null
+
+    fun generateAesKey(): SecretKey {
+        val keyGen = KeyGenerator.getInstance("AES")
+        keyGen.init(256) // AESka 256aya
+        val key = keyGen.generateKey()
+        this.sessionAesKey = key
+        return key
+    }
+
+
+    fun getPublicKeyFromPem(pem: String): PublicKey {
+        // Чистим ключ от говна лишнего
+        val cleanPem = pem
+            .replace("-----BEGIN PUBLIC KEY-----", "")
+            .replace("-----END PUBLIC KEY-----", "")
+            .replace("\n", "")
+            .replace("\r", "")
+            .trim()
+        val decoded = Base64.decode(cleanPem, Base64.DEFAULT)
+        val spec = X509EncodedKeySpec(decoded)
+        return KeyFactory.getInstance("RSA").generatePublic(spec)
+    }
+
+
+    // Тут кароче шифр для рсашки, которой мы отправим данные на сервак
+    fun encryptWithRSA(data: String, publicKey: PublicKey): String {
+        val cipher = Cipher.getInstance(rsaTransformation)
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        val encryptedBytes = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+    }
+
+    // шифр аески нашей, которую мы записали туда
+    fun encryptWithAES(data: String): String {
+        val key = sessionAesKey ?: throw IllegalStateException("AES key not generated!")
+        val cipher = Cipher.getInstance(aesTransformation)
+
+        val ivBytes = ByteArray(16)
+        SecureRandom().nextBytes(ivBytes)
+        val iv = IvParameterSpec(ivBytes)
+
+        cipher.init(Cipher.ENCRYPT_MODE, key, iv)
+        val encryptedBytes = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
+        val ret_data = ivBytes+encryptedBytes
+
+        return Base64.encodeToString(ret_data, Base64.NO_WRAP)
+    }
+
+    fun getAesKeyBase64(): String {
+        return Base64.encodeToString(sessionAesKey?.encoded, Base64.NO_WRAP)
+    }
+
+
+    fun decryptWithAES(encryptedPackage: String): String {
+        return try {
+            val fullPackage = Base64.decode(encryptedPackage, Base64.DEFAULT)
+            val iv = fullPackage.copyOfRange(0, 16)
+            val ciphertext = fullPackage.copyOfRange(16, fullPackage.size)
+
+            val keySpec = SecretKeySpec(sessionAesKey?.encoded, "AES")
+            val ivSpec = IvParameterSpec(iv)
+
+
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
+
+
+            val decryptedBytes = cipher.doFinal(ciphertext)
+
+            String(decryptedBytes, Charsets.UTF_8)
+        } catch (e: Exception) {
+            logCreator("Ошибка дешифровки AES: ${e.message}", "CryptManager", ERROR)
+            ""
+
+        }
+
+    }
+
 }
