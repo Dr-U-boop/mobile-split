@@ -7,7 +7,8 @@ import kotlinx.serialization.json.JsonElement
 @Serializable
 data class AuthRequest(
     val username: String,
-    val password: String
+    val password: String,
+    val key: String
 )
 
 @Serializable
@@ -108,5 +109,5 @@ data class TimeseriesDataPointRequest(
 @Serializable
 data class TimeseriesDataRequest(
     @SerialName("data_points")
-    val dataPoints: List<TimeseriesDataPointRequest>
+    val dataPoints: String
 )
