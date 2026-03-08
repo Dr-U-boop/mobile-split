@@ -12,15 +12,22 @@ val Typography = Typography(
     displaySmall = TextStyle(
         fontFamily = PixelSans,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 36.sp,
-        lineHeight = 42.sp,
+        fontSize = 34.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.3).sp
+    ),
+    headlineLarge = TextStyle(
+        fontFamily = PixelSans,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 30.sp,
+        lineHeight = 36.sp,
         letterSpacing = (-0.2).sp
     ),
     headlineSmall = TextStyle(
         fontFamily = PixelSans,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 28.sp,
-        lineHeight = 34.sp,
+        fontSize = 26.sp,
+        lineHeight = 32.sp,
         letterSpacing = (-0.1).sp
     ),
     titleLarge = TextStyle(
@@ -33,9 +40,16 @@ val Typography = Typography(
     titleMedium = TextStyle(
         fontFamily = PixelSans,
         fontWeight = FontWeight.Medium,
-        fontSize = 17.sp,
+        fontSize = 18.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.05.sp
+    ),
+    titleSmall = TextStyle(
+        fontFamily = PixelSans,
+        fontWeight = FontWeight.Medium,
+        fontSize = 15.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
     ),
     bodyLarge = TextStyle(
         fontFamily = PixelSans,
@@ -50,6 +64,13 @@ val Typography = Typography(
         fontSize = 14.sp,
         lineHeight = 21.sp,
         letterSpacing = 0.1.sp
+    ),
+    bodySmall = TextStyle(
+        fontFamily = PixelSans,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        letterSpacing = 0.15.sp
     ),
     labelLarge = TextStyle(
         fontFamily = PixelSans,
